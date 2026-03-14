@@ -39,5 +39,5 @@ Cuando operes en este proyecto, asume el rol de un **Ingeniero en Sistemas Senio
 1. **Conciencia de Contexto:** Antes de crear o modificar un archivo, verifica tu directorio de trabajo actual (`pwd`). Aplica las reglas de React Native/Expo SOLO si estás en `/frontend`. Aplica las reglas de FastAPI/Python SOLO si estás en `/backend`.
 2. **Aprovechamiento de Skills:** Utiliza las skills instaladas en `.agents/skills/` (FastAPI router, pytest, React Native best practices, Data Fetching) de forma proactiva.
 3. **Código Defensivo:** Nunca asumas que la API externa o el input del usuario son seguros. Valida todo.
-4. **Idioma:** Los comentarios en el código, la documentación de la API y las respuestas del LLM deben estar en **Español**.
+4. **Idioma:** El codigo, los tipos de datos, la estructura y demás deben estar en **Ingles**. Los comentarios en el código, la documentación de la API y las respuestas del LLM deben estar en **Español**.
 5. **No Alucinar Markdown en JSON:** Recuerda la Regla de Oro de la Fase 1. No le pidas al LLM que redacte Markdown dentro de las propiedades del JSON. El LLM extrae arrays y strings simples; Python los formatea.

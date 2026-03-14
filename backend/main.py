@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 # Keep main.py as a lightweight entrypoint that wires the router
 app = FastAPI(title="Pocket PO API")
@@ -10,3 +11,12 @@ except Exception:
     from .app import router as api_router  # type: ignore
 
 app.include_router(api_router)
+
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Update this to restrict origins in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

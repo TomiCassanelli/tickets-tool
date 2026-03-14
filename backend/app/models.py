@@ -1,11 +1,18 @@
 from pydantic import BaseModel, Field
+from typing import List
 
 
-class Ticket(BaseModel):
-    title: str = Field(..., description="A short, clear title for the issue or feature")
-    description: str = Field(..., description="User story or detailed technical description")
-    type: str = Field(..., description="Must be 'Bug', 'Feature' or 'Task'")
-    priority: str = Field(..., description="Must be 'High', 'Medium' or 'Low'")
+class TicketMetadata(BaseModel):
+    titulo: str = Field(..., description="Short and clear title for the issue or feature")
+    tipo: str = Field(..., description="Must be 'Bug', 'Feature' or 'Task'")
+    prioridad: str = Field(..., description="Must be 'High', 'Medium' or 'Low'")
+    contexto: str = Field(..., description="Technical context or detailed description")
+    criterios_de_aceptacion: List[str] = Field(..., description="List of acceptance criteria")
+
+
+class TicketResponse(BaseModel):
+    metadata: TicketMetadata
+    markdown: str
 
 
 class UserRequest(BaseModel):
