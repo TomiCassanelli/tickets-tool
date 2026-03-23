@@ -1,5 +1,5 @@
 from groq import Groq
-from .config import get_env
+from .config import settings
 
 
 def get_ai_client() -> Groq:
@@ -7,5 +7,4 @@ def get_ai_client() -> Groq:
 
     The API key is read from the environment variable `GROQ_API_KEY`.
     """
-    api_key = get_env('GROQ_API_KEY')
-    return Groq(api_key=api_key)
+    return Groq(api_key=settings.GROQ_API_KEY)

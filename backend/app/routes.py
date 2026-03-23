@@ -1,66 +1,97 @@
-from fastapi import APIRouter, HTTPException
 import json
+import logging
+from typing import Union
 
-from .models import TicketMetadata, TicketResponse, UserRequest
-from .ai_client import get_ai_client
+from fastapi import APIRouter, HTTPException
 
+from .models import (
+    TicketMetadata,
+    TicketResponse,
+    UserRequest,
+    ClarifyResponse,
+    ClarificationRequest,
+    ConversationTurn,
+)
+from .utils import generar_markdown
+from .services.ticket_service import call_ai_and_parse
+from .utils import SYSTEM_PROMPT
+
+logger = logging.getLogger(__name__)
+
+# Router
 router = APIRouter()
 
-
-def generar_markdown(metadata: TicketMetadata) -> str:
-    criterios = "\n".join(f"- [ ] {c}" for c in metadata.criterios_de_aceptacion)
-    return f"""# {metadata.titulo}
-
-## Tipo: {metadata.tipo} | Prioridad: {metadata.prioridad}
-
-### Contexto
-{metadata.contexto}
-
-### Criterios de Aceptación
-{criterios}
-"""
+# Constants
+MODEL_NAME = "llama-3.1-8b-instant"
 
 
-@router.post("/api/analyze-request", response_model=TicketResponse)
+def _build_conversation_prompt(raw_text: str, history: list[ConversationTurn]) -> str:
+    """Build the prompt including conversation history for context."""
+    prompt = raw_text
+    
+    if history:
+        prompt += "\n\n--- Conversación previa ---\n"
+        for turn in history:
+            prompt += f"Pregunta: {turn.question}\nRespuesta: {turn.answer}\n"
+    
+    return prompt
+
+
+@router.post("/api/analyze-request", response_model=Union[TicketResponse, ClarifyResponse])
 async def analyze_request(req: UserRequest):
-    # Sistema: instrucciones para el LLM en ingles
-    system_prompt = """
-You are a strict Technical Product Owner. Your job is to receive an informal
-request from a client or manager and convert it into a structured technical ticket.
+    """Receive raw text, ask the AI for structured ticket data, and return metadata + markdown.
 
-Respond ONLY in valid JSON with these exact keys:
-- "titulo": short and clear title
-- "tipo": must be "Bug", "Feature" or "Task"
-- "prioridad": must be "High", "Medium" or "Low"
-- "contexto": technical context or detailed description
-- "criterios_de_aceptacion": array of acceptance criteria strings
-
-No extra text, no introductions — only the JSON object.
-"""
-
+    If the AI needs more information, it returns a clarifying question.
+    The client can then send more conversation turns to continue clarifying.
+    """
     try:
-        client = get_ai_client()
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": req.raw_text}
-            ],
-            model="llama-3.1-8b-instant",
-            temperature=0,
-            response_format={"type": "json_object"}
-        )
+        prompt = _build_conversation_prompt(req.raw_text, [])
+        ai_json = call_ai_and_parse(prompt, MODEL_NAME)
 
-        raw_response = chat_completion.choices[0].message.content
-        if not raw_response:
-            raise HTTPException(status_code=500, detail="Empty response from AI")
-        ai_json = json.loads(raw_response)
+        if isinstance(ai_json, dict) and "clarifying_question" in ai_json:
+            return ClarifyResponse(
+                clarifying_question=ai_json["clarifying_question"],
+                needs_more_clarification=ai_json.get("needs_more_clarification", True),
+                conversation_context=ai_json.get("conversation_context", "")
+            )
 
         metadata = TicketMetadata(**ai_json)
         markdown = generar_markdown(metadata)
 
-        return TicketResponse(metadata=metadata, markdown=markdown)
+        return TicketResponse(metadata=metadata, markdown=markdown, needs_more_clarification=False)
 
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Invalid JSON response from AI")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+        logger.exception("Unexpected error in analyze_request")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/api/continue-conversation", response_model=Union[TicketResponse, ClarifyResponse])
+async def continue_conversation(req: ClarificationRequest):
+    """Continue the conversation with the user's answer to a clarifying question.
+    
+    This endpoint allows multiple turns of conversation until the AI determines
+    that it has enough information to create a complete ticket.
+    """
+    try:
+        prompt = _build_conversation_prompt(req.raw_text, req.conversation_history)
+        ai_json = call_ai_and_parse(prompt, MODEL_NAME)
+
+        if isinstance(ai_json, dict) and "clarifying_question" in ai_json:
+            return ClarifyResponse(
+                clarifying_question=ai_json["clarifying_question"],
+                needs_more_clarification=ai_json.get("needs_more_clarification", True),
+                conversation_context=ai_json.get("conversation_context", "")
+            )
+
+        metadata = TicketMetadata(**ai_json)
+        markdown = generar_markdown(metadata)
+
+        return TicketResponse(metadata=metadata, markdown=markdown, needs_more_clarification=False)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Unexpected error in continue_conversation")
+        raise HTTPException(status_code=500, detail="Internal server error")

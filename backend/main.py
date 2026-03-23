@@ -1,14 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-# Keep main.py as a lightweight entrypoint that wires the router
-app = FastAPI(title="Pocket PO API")
+from app.routes import router as api_router
 
-try:
-    from app import router as api_router
-except Exception:
-    # If package import fails, try relative fallback
-    from .app import router as api_router  # type: ignore
+# Keep main.py as a lightweight entrypoint that wires the router
+app = FastAPI(title="Tickets-Tool")
 
 app.include_router(api_router)
 
