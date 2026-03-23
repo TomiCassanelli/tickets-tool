@@ -28,10 +28,10 @@ El ticket DEBE contener:
 - contexto: Descripción detallada técnica de qué se quiere lograr.
 - criterios_de_aceptacion: Lista de validaciones (ej: "El botón debe ser azul", "Debe llamar al endpoint X").
 - historia_como, historia_quiero, historia_para: Formato estándar de historia de usuario.
-- alcance: Qué entra y qué NO entra explícitamente en el ticket.
+- alcance: (string) Qué entra y qué NO entra explícitamente en el ticket. Redáctalo en texto plano (NO uses diccionarios ni objetos).
 - riesgos: Lista de posibles impactos negativos o dependencias técnicas.
 - definition_of_done: Lista de tareas para dar por cerrado el ticket (ej: "Código revisado", "Tests pasando", "Desplegado en QA").
-- notas_tecnicas: Consideraciones de arquitectura, librerías o dependencias.
+- notas_tecnicas: (string) Consideraciones de arquitectura, librerías o dependencias. Redáctalo en texto plano (NO uses listas).
 
 Responde SÓLO en JSON válido que cumpla esta estructura exacta. No agregues texto fuera del JSON.
 """

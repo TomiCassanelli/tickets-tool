@@ -6,7 +6,7 @@ from ..core.ai_client import get_ai_client
 from ..core.config import settings
 from ..models import (
     TicketSession, Message, AgenticResponse, ToolCallingMeta, 
-    TicketMetadata, GenerateResponseData, ReviseResponseData
+    TicketMetadata, CreateTicketResponseData, UpdateTicketResponseData
 )
 from ..repository import TicketRepository
 from ..state_machine import TicketStatus, transition_ticket, InvalidStateException
@@ -59,11 +59,11 @@ def _create_agentic_response(session: TicketSession, action: str, next_questions
     if next_questions is None:
         next_questions = []
     if session.status == TicketStatus.NEEDS_CLARIFICATION:
-        next_actions = [f"/api/tickets/{session.id}/clarifications"]
+        next_actions = [f"/api/tickets/{session.id}/answer"]
     elif session.status == TicketStatus.READY_TO_GENERATE:
-        next_actions = [f"/api/tickets/{session.id}/generate"]
+        next_actions = [f"/api/tickets/{session.id}/create"]
     elif session.status == TicketStatus.GENERATED:
-        next_actions = [f"/api/tickets/{session.id}/revise", f"/api/tickets/{session.id}/finalize"]
+        next_actions = [f"/api/tickets/{session.id}/update", f"/api/tickets/{session.id}/finish"]
         
     meta = ToolCallingMeta(
         ticket_id=session.id,
@@ -75,7 +75,7 @@ def _create_agentic_response(session: TicketSession, action: str, next_questions
     )
     return AgenticResponse(meta=meta, data=data)
 
-def process_intake(prompt: str, repo: TicketRepository) -> AgenticResponse:
+def start_ticket_flow(prompt: str, repo: TicketRepository) -> AgenticResponse:
     """Handles the initial intake of a ticket request."""
     session = TicketSession()
     session.history.append(Message(role="user", content=prompt))
@@ -90,14 +90,13 @@ def process_intake(prompt: str, repo: TicketRepository) -> AgenticResponse:
     else:
         session.status = transition_ticket(session.status, TicketStatus.NEEDS_CLARIFICATION)
         session.missing_context_fields = missing_fields
-        # Append assistant questions to history
         if next_questions:
             session.history.append(Message(role="assistant", content=" ".join(next_questions)))
             
     repo.save(session)
-    return _create_agentic_response(session, "intake_processed", next_questions)
+    return _create_agentic_response(session, "started", next_questions)
 
-def process_clarification(ticket_id: str, answer: str, repo: TicketRepository) -> AgenticResponse:
+def answer_ticket_question(ticket_id: str, answer: str, repo: TicketRepository) -> AgenticResponse:
     """Handles user clarification answers."""
     session = repo.get(ticket_id)
     if not session:
@@ -125,10 +124,10 @@ def process_clarification(ticket_id: str, answer: str, repo: TicketRepository) -
             session.history.append(Message(role="assistant", content=" ".join(next_questions)))
             
     repo.save(session)
-    return _create_agentic_response(session, "clarification_processed", next_questions)
+    return _create_agentic_response(session, "answer_saved", next_questions)
 
 
-def process_generate(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
+def create_ticket(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
     """Generates the actual ticket metadata based on complete history."""
     session = repo.get(ticket_id)
     if not session:
@@ -138,8 +137,8 @@ def process_generate(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
     if session.status != TicketStatus.READY_TO_GENERATE:
         # Idempotency check: if it's already generated, just return it.
         if session.status == TicketStatus.GENERATED and session.ticket_data is not None:
-            data = GenerateResponseData(ticket=session.ticket_data, version=session.ticket_version)
-            return _create_agentic_response(session, "ticket_already_generated", data=data)
+            data = CreateTicketResponseData(ticket=session.ticket_data, version=session.ticket_version)
+            return _create_agentic_response(session, "already_created", data=data)
         
         raise InvalidStateException(f"Cannot generate ticket from {session.status.value} state")
 
@@ -175,11 +174,11 @@ def process_generate(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
     
     repo.save(session)
     
-    data = GenerateResponseData(ticket=session.ticket_data, version=session.ticket_version)
-    return _create_agentic_response(session, "ticket_generated", data=data)
+    data = CreateTicketResponseData(ticket=session.ticket_data, version=session.ticket_version)
+    return _create_agentic_response(session, "created", data=data)
 
 
-def process_revise(ticket_id: str, feedback: str, repo: TicketRepository) -> AgenticResponse:
+def update_ticket(ticket_id: str, feedback: str, repo: TicketRepository) -> AgenticResponse:
     """Revises an existing ticket based on feedback."""
     session = repo.get(ticket_id)
     if not session:
@@ -233,15 +232,15 @@ def process_revise(ticket_id: str, feedback: str, repo: TicketRepository) -> Age
     
     repo.save(session)
     
-    data = ReviseResponseData(
+    data = UpdateTicketResponseData(
         ticket=session.ticket_data, 
         version=session.ticket_version,
         diff_summary=diff_summary
     )
-    return _create_agentic_response(session, "ticket_revised", data=data)
+    return _create_agentic_response(session, "updated", data=data)
 
 
-def process_finalize(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
+def finish_ticket(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
     """Finalizes the ticket, locking it from further changes."""
     session = repo.get(ticket_id)
     if not session:
@@ -249,7 +248,7 @@ def process_finalize(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
         
     if session.status == TicketStatus.FINALIZED:
         # Idempotency
-        return _create_agentic_response(session, "ticket_already_finalized")
+        return _create_agentic_response(session, "already_finished")
         
     if session.status != TicketStatus.GENERATED:
         raise InvalidStateException(f"Cannot finalize ticket from {session.status.value} state")
@@ -257,4 +256,4 @@ def process_finalize(ticket_id: str, repo: TicketRepository) -> AgenticResponse:
     session.status = transition_ticket(session.status, TicketStatus.FINALIZED)
     repo.save(session)
     
-    return _create_agentic_response(session, "ticket_finalized")
+    return _create_agentic_response(session, "finished")

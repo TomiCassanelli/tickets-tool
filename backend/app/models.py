@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import List, Optional, Generic, TypeVar
 import uuid
+import json
 from datetime import datetime
 from .state_machine import TicketStatus
 
@@ -22,7 +23,6 @@ class TicketMetadata(BaseModel):
     riesgos: List[str] = Field(default_factory=list, description="Potential risks")
     definition_of_done: List[str] = Field(default_factory=list, description="Definition of Done (DoD)")
     notas_tecnicas: Optional[str] = Field(default="", description="Technical notes")
-
 
 class TicketResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -47,9 +47,9 @@ class ConversationTurn(BaseModel):
     answer: str
 
 
-class ClarificationRequest(BaseModel):
+class AnswerQuestionRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
-    
+
     answer: str
 
 
@@ -103,39 +103,31 @@ class AgenticResponse(BaseModel, Generic[T]):
     data: Optional[T] = None
 
 
-class IntakeRequest(BaseModel):
+class StartTicketRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     
     prompt: str
 
 
-class ClarificationRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    
-    answer: str
-
-
-
-class GenerateRequest(BaseModel):
+class CreateTicketRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     # Empty request for now, but good practice to have a model
 
-class ReviseRequest(BaseModel):
+class UpdateTicketRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     feedback: str = Field(..., description="Instructions on what to change in the ticket")
 
-class FinalizeRequest(BaseModel):
+class FinishTicketRequest(BaseModel):
     model_config = ConfigDict(extra="ignore")
     # Empty request
 
-class GenerateResponseData(BaseModel):
+class CreateTicketResponseData(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ticket: TicketMetadata
     version: int
 
-class ReviseResponseData(BaseModel):
+class UpdateTicketResponseData(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ticket: TicketMetadata
     version: int
     diff_summary: str = Field(default="", description="Summary of changes made based on feedback")
-
