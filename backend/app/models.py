@@ -1,9 +1,13 @@
-from pydantic import BaseModel, Field
-from typing import List
-from typing import Optional
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Generic, TypeVar
+import uuid
+from datetime import datetime
+from .state_machine import TicketStatus
 
 
 class TicketMetadata(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     titulo: str = Field(..., description="Short and clear title for the issue or feature")
     tipo: str = Field(..., description="Must be 'Bug', 'Feature' or 'Task'")
     prioridad: str = Field(..., description="Must be 'High', 'Medium' or 'Low'")
@@ -12,34 +16,126 @@ class TicketMetadata(BaseModel):
     historia_como: str = Field(default="", description="User story 'Como' (who/role)")
     historia_quiero: str = Field(default="", description="User story 'Quiero' (want/goal)")
     historia_para: str = Field(default="", description="User story 'Para' (benefit)")
+    
+    # Nuevos campos fase 1
+    alcance: Optional[str] = Field(default="", description="Scope of the ticket")
+    riesgos: List[str] = Field(default_factory=list, description="Potential risks")
+    definition_of_done: List[str] = Field(default_factory=list, description="Definition of Done (DoD)")
+    notas_tecnicas: Optional[str] = Field(default="", description="Technical notes")
 
 
 class TicketResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     metadata: TicketMetadata
     markdown: str
     needs_more_clarification: bool = Field(default=False, description="Whether more clarification is needed")
 
 
 class ClarifyResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     clarifying_question: str = Field(..., description="Single clarifying question to ask the user")
     needs_more_clarification: bool = Field(default=True, description="Whether more clarification will be needed after answering")
     conversation_context: str = Field(default="", description="Context of what has been clarified so far")
 
 
-class ClarificationSubmission(BaseModel):
-    raw_text: str
-    answers: List[str]
-
-
 class ConversationTurn(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     question: str
     answer: str
 
 
 class ClarificationRequest(BaseModel):
-    raw_text: str
-    conversation_history: List[ConversationTurn] = Field(default_factory=list)
+    model_config = ConfigDict(extra="ignore")
+    
+    answer: str
 
 
 class UserRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
     raw_text: str
+
+
+# Nuevos modelos base Fase 1/2 para el flujo conversacional y persistencia
+class Message(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TicketSession(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    status: TicketStatus = Field(default=TicketStatus.DRAFT)
+    history: List[Message] = Field(default_factory=list)
+    ticket_data: Optional[TicketMetadata] = None
+    ticket_version: int = Field(default=0)
+    missing_context_fields: List[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# API V1 Models (Tool-calling readiness)
+class ToolCallingMeta(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    schema_version: str = "1.0"
+    ticket_id: str
+    status: TicketStatus
+    action: str
+    next_allowed_actions: List[str]
+    missing_context_fields: List[str] = Field(default_factory=list)
+    next_questions: List[str] = Field(default_factory=list)
+
+
+T = TypeVar('T')
+
+class AgenticResponse(BaseModel, Generic[T]):
+    model_config = ConfigDict(extra="ignore")
+    
+    meta: ToolCallingMeta
+    data: Optional[T] = None
+
+
+class IntakeRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    prompt: str
+
+
+class ClarificationRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    
+    answer: str
+
+
+
+class GenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    # Empty request for now, but good practice to have a model
+
+class ReviseRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    feedback: str = Field(..., description="Instructions on what to change in the ticket")
+
+class FinalizeRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    # Empty request
+
+class GenerateResponseData(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ticket: TicketMetadata
+    version: int
+
+class ReviseResponseData(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    ticket: TicketMetadata
+    version: int
+    diff_summary: str = Field(default="", description="Summary of changes made based on feedback")
+
