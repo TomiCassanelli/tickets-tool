@@ -1,0 +1,6 @@
+venv
+COMMANDS.md
+requirements.txt
+.env
+node_modules
+.next
