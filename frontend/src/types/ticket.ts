@@ -43,6 +43,9 @@ export interface ToolCallingMeta {
   next_questions: string[];
   intent: string;
   objective: string;
+  confidence: number;
+  quality_score: number;
+  retries_used: number;
 }
 
 export interface AgenticResponse<T> {

@@ -1,6 +1,9 @@
 venv
 COMMANDS.md
-requirements.txt
 .env
 node_modules
 .next
+backend/telemetry/
+backend/backend/telemetry/
+.pytest_cache
+pytest.ini
