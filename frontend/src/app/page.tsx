@@ -1,340 +1,428 @@
-'use client'
+"use client";
 
-import { useState, useCallback, useRef, useEffect, memo } from 'react'
-import ReactMarkdown from 'react-markdown'
+import { KeyboardEvent, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
-type TicketMarkdown = { markdown: string; metadata: TicketMetadata }
+import {
+  answerTicket,
+  createTicket,
+  finishTicket,
+  startTicket,
+  updateTicket,
+} from "../lib/ticketApi";
+import { buildTicketMarkdown } from "../lib/ticketMarkdown";
+import { TICKET_STATUS, type ConversationTurn, type ToolCallingMeta } from "../types/ticket";
 
-interface TicketMetadata {
-  titulo: string
-  tipo: string
-  prioridad: string
-  contexto: string
-  criterios_de_aceptacion: string[]
-  historia_como: string
-  historia_quiero: string
-  historia_para: string
+const API_BASE_DEFAULT = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+interface ChatMessage {
+  role: "user" | "assistant";
+  text: string;
 }
 
-interface ConversationTurn {
-  question: string
-  answer: string
+interface QuickAction {
+  id: "create" | "finish" | "update";
+  label: string;
 }
 
-interface ClarifyState {
-  question: string
-  needsMore: boolean
-  conversationContext: string
-}
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-
-function TicketDrawer({
+function TicketModal({
   markdown,
   onClose,
-  onUpdate,
 }: {
-  markdown: string
-  onClose: () => void
-  onUpdate: (md: string) => void
+  markdown: string;
+  onClose: () => void;
 }) {
-  const [isEditing, setIsEditing] = useState(false)
-  const [editedMarkdown, setEditedMarkdown] = useState(markdown)
-
-  useEffect(() => {
-    setEditedMarkdown(markdown)
-    setIsEditing(false)
-  }, [markdown])
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(editedMarkdown)
-  }
-
-  const handleSave = () => {
-    onUpdate(editedMarkdown)
-    setIsEditing(false)
-  }
-
   return (
-    <div className="fixed inset-y-0 right-0 w-full md:w-[500px] bg-white shadow-2xl z-50 flex flex-col">
-      <div className="flex items-center justify-between p-4 border-b border-gray-200">
-        <h2 className="text-lg font-semibold text-gray-900">Ticket Preview</h2>
-        <div className="flex gap-2">
-          <button
-            onClick={handleCopy}
-            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg active:scale-95 transition-transform"
-          >
-            Copiar
-          </button>
-          {isEditing ? (
-            <button
-              onClick={handleSave}
-              className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg active:scale-95 transition-transform"
-            >
-              Guardar
-            </button>
-          ) : (
-            <button
-              onClick={() => setIsEditing(true)}
-              className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg active:scale-95 transition-transform"
-            >
-              Editar
-            </button>
-          )}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+      <div className="max-h-[88vh] w-full max-w-2xl overflow-auto rounded-3xl border border-slate-200 bg-white shadow-2xl">
+        <div className="sticky top-0 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
+          <p className="text-sm font-semibold text-slate-800">Ticket listo para copiar</p>
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-sm bg-gray-100 text-gray-700 rounded-lg active:scale-95 transition-transform"
+            className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700"
           >
             Cerrar
           </button>
         </div>
-      </div>
-
-      <div className="flex-1 overflow-auto p-4">
-        {isEditing ? (
-          <textarea
-            value={editedMarkdown}
-            onChange={(e) => setEditedMarkdown(e.target.value)}
-            className="w-full h-full min-h-[400px] p-3 text-sm font-mono border border-gray-300 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        ) : (
-          <article className="prose prose-sm max-w-none">
-            <ReactMarkdown>{editedMarkdown}</ReactMarkdown>
-          </article>
-        )}
+        <article className="prose prose-sm max-w-none px-5 py-4">
+          <ReactMarkdown>{markdown}</ReactMarkdown>
+        </article>
       </div>
     </div>
-  )
+  );
 }
 
-const ConversationBubble = memo(function ConversationBubble({
-  turns,
-  currentQuestion,
+function AssistantBubble({
+  text,
+  quickActions,
+  onQuickAction,
 }: {
-  turns: ConversationTurn[]
-  currentQuestion: string
+  text: string;
+  quickActions: QuickAction[];
+  onQuickAction: (actionId: QuickAction["id"]) => void;
 }) {
   return (
-    <div className="w-full max-w-md mx-auto mb-6 space-y-4">
-      {turns.map((turn, index) => (
-        <div key={index} className="space-y-2">
-          <div className="bg-gray-100 rounded-lg p-3 text-sm text-gray-700">
-            <span className="font-medium">Pregunta {index + 1}:</span> {turn.question}
+    <div className="flex gap-3">
+      <div className="mt-1 h-8 w-8 shrink-0 rounded-full bg-indigo-600 text-center text-xs font-semibold leading-8 text-white">
+        AI
+      </div>
+      <div className="max-w-[88%] rounded-2xl rounded-tl-sm border border-indigo-100 bg-white px-4 py-3 shadow-sm">
+        <p className="text-sm leading-6 text-slate-700">{text}</p>
+        {quickActions.length > 0 ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {quickActions.map((action) => (
+              <button
+                key={action.id}
+                onClick={() => onQuickAction(action.id)}
+                className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700"
+              >
+                {action.label}
+              </button>
+            ))}
           </div>
-          <div className="bg-blue-50 rounded-lg p-3 text-sm text-gray-800 ml-4">
-            <span className="font-medium">Tu respuesta:</span> {turn.answer}
-          </div>
-        </div>
-      ))}
-      {currentQuestion && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
-          <span className="font-medium text-amber-800">Nueva pregunta:</span>{' '}
-          <span className="text-gray-700">{currentQuestion}</span>
-        </div>
-      )}
+        ) : null}
+      </div>
     </div>
-  )
-})
+  );
+}
+
+function UserBubble({ text }: { text: string }) {
+  return (
+    <div className="flex justify-end">
+      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-slate-100 px-4 py-3 text-sm leading-6 text-slate-800 shadow-sm">
+        {text}
+      </div>
+    </div>
+  );
+}
 
 export default function HomePage() {
-  const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [clarify, setClarify] = useState<ClarifyState | null>(null)
-  const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([])
-  const [ticket, setTicket] = useState<TicketMarkdown | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
-  const originalTextRef = useRef<string>('')
+  const [apiBase, setApiBase] = useState(API_BASE_DEFAULT);
+  const [ticketId, setTicketId] = useState("");
+  const [message, setMessage] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const [meta, setMeta] = useState<ToolCallingMeta | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: "assistant",
+      text: "Hola. Contame que ticket necesitas y te acompano paso a paso.",
+    },
+  ]);
+  const [conversationTurns, setConversationTurns] = useState<ConversationTurn[]>([]);
+  const [lastQuestion, setLastQuestion] = useState("");
+  const [ticketMarkdown, setTicketMarkdown] = useState("");
+  const [pendingUpdate, setPendingUpdate] = useState(false);
+  const [updateFeedback, setUpdateFeedback] = useState("");
 
-  const analyzeRequest = useCallback(async (text: string) => {
-    setIsLoading(true)
-    setError(null)
+  const canAnswer = meta?.status === TICKET_STATUS.NEEDS_CLARIFICATION;
+  const canCreate = meta?.status === TICKET_STATUS.READY_TO_GENERATE;
+  const canUpdateOrFinish = meta?.status === TICKET_STATUS.GENERATED;
+
+  function appendAssistant(text: string) {
+    setMessages((prev) => [...prev, { role: "assistant", text }]);
+  }
+
+  function explainStatus(nextMeta: ToolCallingMeta): string {
+    if (nextMeta.status === TICKET_STATUS.NEEDS_CLARIFICATION && nextMeta.next_questions[0]) {
+      return nextMeta.next_questions[0];
+    }
+    if (nextMeta.status === TICKET_STATUS.READY_TO_GENERATE) {
+      return "Perfecto, ya tengo contexto suficiente. Puedo generar el ticket cuando quieras.";
+    }
+    if (nextMeta.status === TICKET_STATUS.GENERATED) {
+      return "Listo, ticket generado. Queres que lo ajustemos o lo finalizamos?";
+    }
+    if (nextMeta.status === TICKET_STATUS.FINALIZED) {
+      return "Excelente, ticket finalizado. Si queres arrancamos uno nuevo.";
+    }
+    return "Te sigo leyendo.";
+  }
+
+  function quickActionsForMeta(nextMeta: ToolCallingMeta): QuickAction[] {
+    if (nextMeta.status === TICKET_STATUS.READY_TO_GENERATE) {
+      return [{ id: "create", label: "Generar ticket" }];
+    }
+    if (nextMeta.status === TICKET_STATUS.GENERATED) {
+      return [
+        { id: "update", label: "Ajustar ticket" },
+        { id: "finish", label: "Finalizar ticket" },
+      ];
+    }
+    return [];
+  }
+
+  function syncMeta(nextMeta: ToolCallingMeta) {
+    setMeta(nextMeta);
+    setTicketId(nextMeta.ticket_id);
+    setLastQuestion(nextMeta.next_questions[0] || "");
+  }
+
+  async function handleStartFlow(text: string) {
+    const response = await startTicket(apiBase, text);
+    syncMeta(response.meta);
+    appendAssistant(explainStatus(response.meta));
+  }
+
+  async function handleClarification(text: string) {
+    if (!ticketId) {
+      appendAssistant("Necesito un ticket activo para continuar. Empecemos desde el inicio.");
+      return;
+    }
+
+    const response = await answerTicket(apiBase, ticketId, text);
+    syncMeta(response.meta);
+    setConversationTurns((prev) => [...prev, { question: lastQuestion, answer: text }]);
+    appendAssistant(explainStatus(response.meta));
+  }
+
+  async function handleCreateTicket() {
+    if (!ticketId) {
+      appendAssistant("Necesito ticket_id para generarlo. Empecemos de nuevo.");
+      return;
+    }
+
+    const response = await createTicket(apiBase, ticketId);
+    syncMeta(response.meta);
+    if (response.data) {
+      setTicketMarkdown(buildTicketMarkdown(response.data.ticket));
+    }
+    appendAssistant(explainStatus(response.meta));
+  }
+
+  async function handleUpdateTicket(feedback: string) {
+    if (!ticketId) {
+      appendAssistant("No encuentro ticket activo para actualizar.");
+      return;
+    }
+
+    const response = await updateTicket(apiBase, ticketId, feedback);
+    syncMeta(response.meta);
+    if (response.data) {
+      setTicketMarkdown(buildTicketMarkdown(response.data.ticket));
+    }
+    appendAssistant("Hecho. Aplique los cambios al ticket.");
+    setPendingUpdate(false);
+    setUpdateFeedback("");
+  }
+
+  async function handleFinishTicket() {
+    if (!ticketId) {
+      appendAssistant("No hay ticket activo para finalizar.");
+      return;
+    }
+
+    const response = await finishTicket(apiBase, ticketId);
+    syncMeta(response.meta);
+    appendAssistant(explainStatus(response.meta));
+  }
+
+  async function handlePrimarySend() {
+    const text = message.trim();
+    if (!text || isLoading) {
+      return;
+    }
+
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setMessage("");
+    setIsLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/analyze-request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ raw_text: text }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.detail || 'Error en la solicitud')
-      }
-
-      if (data.clarifying_question) {
-        setClarify({
-          question: data.clarifying_question,
-          needsMore: data.needs_more_clarification ?? true,
-          conversationContext: data.conversation_context || '',
-        })
-        originalTextRef.current = text
+      if (canAnswer) {
+        await handleClarification(text);
       } else {
-        setClarify(null)
-        setConversationHistory([])
-        setTicket({ markdown: data.markdown, metadata: data.metadata })
+        await handleStartFlow(text);
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+    } catch (error) {
+      appendAssistant(error instanceof Error ? error.message : "Hubo un error inesperado.");
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
-  }, [])
+  }
 
-  const continueConversation = useCallback(async (answer: string) => {
-    setIsLoading(true)
-    setError(null)
+  async function handleQuickAction(actionId: QuickAction["id"]) {
+    if (isLoading) {
+      return;
+    }
 
-    const newHistory = [...conversationHistory, { question: clarify!.question, answer }]
-    setConversationHistory(newHistory)
-
+    setIsLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/continue-conversation`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          raw_text: originalTextRef.current,
-          conversation_history: newHistory,
-        }),
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.detail || 'Error en la solicitud')
+      if (actionId === "create") {
+        await handleCreateTicket();
+        return;
       }
-
-      if (data.clarifying_question) {
-        setClarify({
-          question: data.clarifying_question,
-          needsMore: data.needs_more_clarification ?? true,
-          conversationContext: data.conversation_context || '',
-        })
-      } else {
-        setClarify(null)
-        setConversationHistory([])
-        setTicket({ markdown: data.markdown, metadata: data.metadata })
+      if (actionId === "finish") {
+        await handleFinishTicket();
+        return;
       }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Error desconocido')
+      setPendingUpdate(true);
+    } catch (error) {
+      appendAssistant(error instanceof Error ? error.message : "No pude ejecutar esa accion.");
     } finally {
-      setIsLoading(false)
-    }
-  }, [clarify, conversationHistory])
-
-  const handleSubmit = () => {
-    if (!input.trim()) return
-    analyzeRequest(input)
-    setInput('')
-  }
-
-  const handleAnswer = () => {
-    if (!input.trim()) return
-    continueConversation(input)
-    setInput('')
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      if (clarify) {
-        handleAnswer()
-      } else {
-        handleSubmit()
-      }
+      setIsLoading(false);
     }
   }
 
-  const resetConversation = () => {
-    setClarify(null)
-    setConversationHistory([])
-    setTicket(null)
-    setError(null)
+  async function handleUpdateSubmit() {
+    const feedback = updateFeedback.trim();
+    if (!feedback || isLoading) {
+      return;
+    }
+
+    setMessages((prev) => [...prev, { role: "user", text: `Ajuste solicitado: ${feedback}` }]);
+    setIsLoading(true);
+    try {
+      await handleUpdateTicket(feedback);
+    } catch (error) {
+      appendAssistant(error instanceof Error ? error.message : "No pude aplicar el ajuste.");
+    } finally {
+      setIsLoading(false);
+    }
   }
+
+  function handleInputKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void handlePrimarySend();
+    }
+  }
+
+  function resetChat() {
+    setMeta(null);
+    setTicketId("");
+    setMessages([
+      {
+        role: "assistant",
+        text: "Nuevo chat listo. Contame que ticket queres crear.",
+      },
+    ]);
+    setMessage("");
+    setLastQuestion("");
+    setTicketMarkdown("");
+    setPendingUpdate(false);
+    setUpdateFeedback("");
+    setConversationTurns([]);
+  }
+
+  const quickActions = meta ? quickActionsForMeta(meta) : [];
 
   return (
-    <main className="min-h-screen bg-gray-50 flex flex-col">
-      <div className="flex-1 flex flex-col lg:flex-row">
-        <div className="flex-1 flex flex-col justify-center p-4 pb-32 lg:pb-4">
-          <div className="w-full max-w-2xl mx-auto">
-            <div className="flex items-center justify-between mb-8">
-              <h1 className="text-2xl font-bold text-gray-900">Ticket Generator</h1>
-              {(clarify || ticket) && (
-                <button
-                  onClick={resetConversation}
-                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  Nueva conversación
-                </button>
-              )}
-            </div>
-
-            {error && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
-                {error}
-              </div>
-            )}
-
-            {clarify && conversationHistory.length > 0 && (
-              <ConversationBubble
-                turns={conversationHistory}
-                currentQuestion={clarify.question}
-              />
-            )}
-
-            {clarify && conversationHistory.length === 0 && (
-              <div className="w-full max-w-md mx-auto mb-6">
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
-                  <p className="font-medium text-amber-800 mb-2">
-                    El asistente necesita más información:
-                  </p>
-                  <p className="text-gray-700">{clarify.question}</p>
-                </div>
-              </div>
-            )}
-
-            <div className="w-full max-w-md mx-auto">
-              <div className="relative">
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={
-                    clarify
-                      ? 'Responde a la pregunta del asistente...'
-                      : 'Describe tu ticket o problema...'
-                  }
-                  disabled={isLoading}
-                  className="w-full p-4 pr-24 text-base border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[120px] shadow-sm"
-                  rows={4}
-                />
-                <button
-                  onClick={clarify ? handleAnswer : handleSubmit}
-                  disabled={!input.trim() || isLoading}
-                  className="absolute right-3 bottom-3 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
-                >
-                  {isLoading ? '...' : clarify ? 'Responder' : 'Enviar'}
-                </button>
-              </div>
-              <p className="text-xs text-gray-400 text-center mt-2">
-                {clarify
-                  ? 'Presiona Enter para responder'
-                  : 'Presiona Enter para enviar, Shift+Enter para nueva línea'}
-              </p>
-            </div>
+    <main className="dot-surface min-h-screen px-3 py-6">
+      <div className="mx-auto w-full max-w-md rounded-3xl border border-slate-200 bg-slate-50 shadow-xl">
+        <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <button className="rounded-full bg-slate-100 p-2 text-slate-500">☰</button>
+          <div className="text-center">
+            <p className="text-base font-semibold text-indigo-600">TicketGen AI</p>
+            <p className="text-[11px] text-slate-500">Conversacion activa</p>
           </div>
-        </div>
+          <button
+            onClick={resetChat}
+            className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600"
+          >
+            Reset
+          </button>
+        </header>
 
-        {ticket && (
-          <TicketDrawer
-            markdown={ticket.markdown}
-            onClose={() => setTicket(null)}
-            onUpdate={(md) => setTicket((prev) => prev ? { ...prev, markdown: md } : null)}
-          />
-        )}
+        <section className="h-[65vh] overflow-y-auto px-3 py-4">
+          <div className="space-y-4">
+            {messages.map((entry, index) =>
+              entry.role === "user" ? (
+                <UserBubble key={`${entry.role}-${index}`} text={entry.text} />
+              ) : (
+                <AssistantBubble
+                  key={`${entry.role}-${index}`}
+                  text={entry.text}
+                  quickActions={index === messages.length - 1 ? quickActions : []}
+                  onQuickAction={(actionId) => void handleQuickAction(actionId)}
+                />
+              ),
+            )}
+            {isLoading ? (
+              <div className="flex items-center gap-2 px-1 text-xs text-slate-500">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" />
+                Procesando...
+              </div>
+            ) : null}
+          </div>
+        </section>
+
+        {pendingUpdate ? (
+          <section className="border-t border-slate-200 bg-white px-3 py-3">
+            <p className="mb-2 text-xs font-medium text-slate-600">Que cambio queres aplicar al ticket?</p>
+            <textarea
+              value={updateFeedback}
+              onChange={(event) => setUpdateFeedback(event.target.value)}
+              rows={3}
+              placeholder="Ejemplo: agrega criterio para metodos regionales"
+              className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+            />
+            <div className="mt-2 flex gap-2">
+              <button
+                onClick={() => {
+                  setPendingUpdate(false);
+                  setUpdateFeedback("");
+                }}
+                className="rounded-full border border-slate-300 px-3 py-1 text-xs text-slate-600"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => void handleUpdateSubmit()}
+                className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-medium text-white"
+              >
+                Aplicar cambio
+              </button>
+            </div>
+          </section>
+        ) : null}
+
+        <footer className="border-t border-slate-200 bg-white px-3 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] text-slate-500">
+              {canAnswer ? "Responde la aclaracion" : "Describe tu necesidad"}
+            </p>
+            <p className="text-[11px] text-slate-400">{ticketId ? `Ticket: ${ticketId.slice(0, 8)}...` : "Sin ticket"}</p>
+          </div>
+
+          <div className="flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-2 py-2">
+            <button className="h-8 w-8 rounded-full bg-white text-slate-500">＋</button>
+            <textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={handleInputKeyDown}
+              rows={1}
+              placeholder="Escribe tu respuesta aqui..."
+              className="max-h-24 flex-1 resize-none bg-transparent text-sm text-slate-700 focus:outline-none"
+            />
+            <button
+              onClick={() => void handlePrimarySend()}
+              disabled={isLoading || !message.trim()}
+              className="h-9 w-9 rounded-xl bg-indigo-600 text-white disabled:opacity-50"
+            >
+              ▲
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-slate-500">
+            <div className="rounded-xl bg-indigo-50 px-2 py-1 font-semibold text-indigo-600">Chat</div>
+            <div className="rounded-xl bg-slate-100 px-2 py-1">Historial</div>
+            <div className="rounded-xl bg-slate-100 px-2 py-1">Config</div>
+          </div>
+        </footer>
+      </div>
+
+      {ticketMarkdown ? <TicketModal markdown={ticketMarkdown} onClose={() => setTicketMarkdown("")} /> : null}
+
+      <div className="mx-auto mt-4 w-full max-w-md rounded-2xl border border-slate-200 bg-white px-3 py-2 text-[11px] text-slate-500 shadow-sm">
+        <p className="font-medium text-slate-600">Conexion</p>
+        <input
+          value={apiBase}
+          onChange={(event) => setApiBase(event.target.value)}
+          className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-700 focus:border-indigo-500 focus:outline-none"
+        />
+        {conversationTurns.length ? (
+          <p className="mt-2 text-[11px] text-slate-400">Aclaraciones resueltas: {conversationTurns.length}</p>
+        ) : null}
       </div>
     </main>
-  )
+  );
 }
